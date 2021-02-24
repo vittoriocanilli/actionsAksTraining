@@ -1,0 +1,71 @@
+name: Deploy  Stg
+env:
+  ACR_URL: vittorioacr.azurecr.io
+
+on: 
+  pull_request:
+    types: [labeled]
+
+jobs:
+  deploy-on-stg:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_FOLDER: ${{ github.workspace }}/src
+    if: contains(github.event.pull_request.labels.*.name, 'stg')
+    steps:
+      - uses: actions/checkout@master
+
+      - name: "Login via Azure CLI"
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.VITTORIO_AZURE_CREDENTIALS }}
+
+      - uses: Azure/get-keyvault-secrets@v1.0
+        with:
+          keyvault: "vittorio-kv"
+          secrets: 'acr-username, acr-password'
+        id: mySecrets
+
+      - uses: Azure/docker-login@v1
+        with:
+          login-server: vittorioacr.azurecr.io
+          username: ${{ steps.mySecrets.outputs.acr-username }}
+          password: ${{ steps.mySecrets.outputs.acr-password }}
+      
+      - run: |
+          docker build -t vittorioacr.azurecr.io/actionsaksk8sdemo:${{ github.sha }} ${{ env.IMAGE_FOLDER }}
+          docker push vittorioacr.azurecr.io/actionsaksk8sdemo:${{ github.sha }}
+
+      - uses: Azure/aks-set-context@v1
+        with:
+          creds: '${{ secrets.VITTORIO_AZURE_CREDENTIALS }}'
+          cluster-name: vittorio-aks
+          resource-group: vittorio-github-training
+          
+      - uses: Azure/k8s-create-secret@v1
+        with:
+          container-registry-url: ${{ env.ACR_URL }}
+          container-registry-username: ${{ steps.mySecrets.outputs.acr-username }}
+          container-registry-password: ${{ steps.mySecrets.outputs.acr-password }}
+          secret-name: demo-k8s-secret
+
+      - uses: cschleiden/replace-tokens@v1
+        with:
+          tokenPrefix: '___'
+          tokenSuffix: '___'
+          files: '["aks/*.yaml"]'
+        env:
+          IMAGE_VERSION: ${{ github.sha }}
+
+      - uses: Azure/k8s-deploy@v1
+        with:
+          namespace: 'actions-aks-stg'
+          manifests: |
+            aks/deployment.yaml
+            aks/service.yaml
+          images: |
+            ${{ env.ACR_URL }}/actionsaksk8sdemo:${{ github.sha }}
+          imagepullsecrets: |
+            demo-k8s-secret 
+          #strategy: canary
+          #percentage: 50

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+spec:
+  nodeSelector:
+    "beta.kubernetes.io/os": linux
+  containers:
+  - image: vittorioacr.azurecr.io/actionsaksk8sdemo:___IMAGE_VERSION___
+    name: nginx
+    resources: {}
+    ports:
+    - containerPort: 80
